@@ -114,10 +114,20 @@ def split_feature_types(features: pd.DataFrame) -> FeatureTypes:
 
 
 def normalize_categoricals(features: pd.DataFrame, categorical: list[str]) -> pd.DataFrame:
-    """Привести категории к строкам, сохранив пропуски.
+    """Привести категории к строкам, сохранив пропуски как `np.nan`.
 
     Одинаковое строковое представление нужно, чтобы `True` и `"True"` из разных источников
     не стали разными категориями.
+
+    Пропуск записывается **именно `np.nan`**, а не `None`. Причина не стилистическая:
+    в колонке типа `object` scikit-learn ищет пропуски проверкой `X != X`, а `None != None`
+    равно `False`. Значение `None` пропуском не признаётся, проходит мимо импьютера
+    и становится полноправной категорией — то есть «значения нет» превращается в значение.
+
+    Хуже того, результат зависел от версии pandas: одни версии сохраняли `None` после `map`,
+    другие приводили его к `NaN`. Один и тот же снимок давал **разные матрицы признаков**
+    в разных окружениях, а значит и разные метрики, — при том что воспроизводимость
+    эксперимента заявлена свойством системы. Обнаружено расхождением CI и рабочей машины.
     """
     if not categorical:
         return features
@@ -125,7 +135,13 @@ def normalize_categoricals(features: pd.DataFrame, categorical: list[str]) -> pd
     normalized = features.copy()
 
     for name in categorical:
-        normalized[name] = normalized[name].map(lambda value: None if pd.isna(value) else str(value))
+        #astype(object) фиксирует тип колонки: без него колонка целиком из пропусков
+        #получила бы float64 и перестала быть категориальной посреди конвейера
+        normalized[name] = (
+            normalized[name]
+            .map(lambda value: np.nan if pd.isna(value) else str(value))
+            .astype(object)
+        )
 
     return normalized
 

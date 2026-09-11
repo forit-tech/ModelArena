@@ -259,7 +259,62 @@ def test_categorical_normalization_unifies_representations() -> None:
 
     #True и "True" из разных источников не должны стать разными категориями
     assert normalized["flag"].tolist()[:2] == ["True", "True"]
-    assert normalized["flag"].tolist()[2] is None
+
+
+def test_missing_category_is_recognised_as_missing_by_the_pipeline() -> None:
+    """Пропуск должен остаться пропуском для конвейера, а не стать категорией.
+
+    Проверяется поведение, а не представление. Прежняя версия теста требовала
+    буквально `None` — и тем самым закрепляла дефект: в колонке `object`
+    scikit-learn ищет пропуски проверкой `X != X`, а `None != None` равно `False`,
+    поэтому `None` проходил мимо импьютера и получал собственный код наравне
+    с настоящими категориями.
+    """
+    import pandas as pd
+
+    frame = pd.DataFrame({"plan": ["basic", "basic", "pro", None]})
+    types = split_feature_types(frame)
+    prepared = normalize_categoricals(frame, ["plan"])
+
+    assert bool(pd.isna(prepared["plan"].iloc[3]))
+
+    codes = build_preprocessor("tree_ordinal", types).fit_transform(prepared).ravel().tolist()
+    #пропуск заполнен самой частой категорией, а не выделен в отдельный код
+    assert codes[3] == codes[0]
+    assert len(set(codes)) == 2, f"пропуск стал отдельной категорией: {codes}"
+
+
+def test_encoding_does_not_depend_on_how_the_gap_is_spelled() -> None:
+    """Один и тот же снимок обязан давать одну матрицу признаков в любом окружении.
+
+    `None`, `np.nan` и `pd.NA` — три способа записать «значения нет», и разные версии
+    pandas приводили их друг к другу по-разному. Пока это различие доходило до модели,
+    одни и те же данные давали разные метрики на CI и на рабочей машине, а
+    воспроизводимость эксперимента заявлена свойством системы (D-8).
+    """
+    import numpy as np
+    import pandas as pd
+
+    matrices = set()
+
+    for missing in (None, np.nan, pd.NA):
+        frame = pd.DataFrame({"plan": ["basic", "basic", "pro", missing]}, dtype=object)
+        types = split_feature_types(frame)
+        prepared = normalize_categoricals(frame, ["plan"])
+        encoded = build_preprocessor("tree_ordinal", types).fit_transform(prepared)
+        matrices.add(tuple(encoded.ravel().tolist()))
+
+    assert len(matrices) == 1, f"написание пропуска меняет матрицу признаков: {matrices}"
+
+
+def test_column_of_only_gaps_stays_categorical() -> None:
+    #без явного типа колонка целиком из пропусков получила бы float64
+    #и перестала быть категориальной посреди конвейера
+    import pandas as pd
+
+    frame = pd.DataFrame({"plan": [None, None, None]}, dtype=object)
+
+    assert normalize_categoricals(frame, ["plan"])["plan"].dtype == object
 
 
 # ---------------------------------------------------------------- контекст
