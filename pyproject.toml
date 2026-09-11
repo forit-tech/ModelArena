@@ -1,0 +1,96 @@
+[project]
+name = "modelarena"
+version = "0.1.0"
+description = "Лаборатория честного сравнения ML-моделей на подготовленном датасете."
+requires-python = ">=3.12,<3.14"
+# ядро ставится только на sklearn-зависимостях (D-2): бустеры — extras, а не обязательный зоопарк
+dependencies = [
+    # верхние границы зафиксированы намеренно: без них свежая установка подтягивает следующую
+    # major-версию, и воспроизводимость эксперимента перестаёт существовать
+    "fastapi>=0.116,<1.0",
+    "joblib>=1.4,<2.0",
+    "jsonschema>=4.20,<5.0",       # валидация Dataset Package против JSON Schema контракта
+    "numpy>=1.26,<3.0",
+    "pandas>=2.2,<4.0",            # только на границе sklearn (D-8)
+    "polars>=1.20,<2.0",
+    "pyarrow>=15.0,<22.0",         # чтение и запись Parquet — canonical format (D-8)
+    "pydantic>=2.7,<3.0",
+    "python-multipart>=0.0.20,<1.0",
+    "scikit-learn>=1.5,<2.0",
+    # нижняя граница поставлена по результатам pip-audit: в 0.47.3 несколько advisories,
+    # исправления начинаются с 0.49.1. Проверено в отдельном окружении — с fastapi 0.141
+    # и starlette 1.6 весь набор тестов проходит
+    "starlette>=0.49.1",
+    "uvicorn[standard]>=0.35,<1.0",
+]
+
+[project.optional-dependencies]
+boosters = [
+    "catboost>=1.2,<2.0",
+    "lightgbm>=4.3,<5.0",
+    "xgboost>=2.0,<4.0",
+]
+tuning = ["optuna>=3.6,<5.0"]
+explain = ["shap>=0.45,<1.0"]
+dev = [
+    "fastexcel>=0.13,<1.0",
+    "httpx>=0.27,<1.0",
+    "mypy>=1.10",
+    "pandas-stubs>=2.2",
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["backend*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::FutureWarning",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+# зеркало контракта не линтуется и не форматируется: оно обязано быть побайтово идентично
+# каталогу владельца, а правка ради стиля сделала бы sha256 в манифесте невалидными
+extend-exclude = ["contracts/dataset-package"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "RUF", "S", "ARG", "PIE", "PL", "BLE", "SLF"]
+ignore = [
+    # RUF001-003 срабатывают на кириллице в строках и комментариях, а интерфейс проекта русскоязычный
+    "RUF001",
+    "RUF002",
+    "RUF003",
+    # предметные модули содержательно длиннее порогов по умолчанию
+    "PLR0912",
+    "PLR0913",
+    "PLR0915",
+    "PLR2004",
+    # B008 неизбежен в FastAPI: File(...) и Form(...) по контракту вызываются в значениях по умолчанию
+    "B008",
+    # локальные импорты осознанны: тяжёлые адаптеры моделей грузятся лениво (D-2)
+    "PLC0415",
+    "PLR0911",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "PLR2004", "ARG001", "E501", "SLF001"]
+
+[tool.mypy]
+# packages появится, когда появится backend; пока проверяется то, что уже есть
+files = ["tests"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+check_untyped_defs = true
