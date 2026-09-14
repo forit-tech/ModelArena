@@ -18,6 +18,8 @@ import { cancelRun, getRun, getRunEvents, startRun } from '../../api/endpoints'
 import type { ContenderRun, MetricSet, RunEvent, RunState, RunView } from '../../api/types'
 import { FailureNotice } from '../../components/FailureNotice'
 import { Notice } from '../../components/Notice'
+import { DiagnosticsPanel } from '../diagnostics/DiagnosticsPanel'
+import { LeaderboardPanel } from './LeaderboardPanel'
 
 const POLL_INTERVAL_MS = 1000
 
@@ -53,10 +55,33 @@ const CONTENDER_STATE_LABELS: Record<string, string> = {
 interface ArenaViewProps {
   datasetId: string | null
   targetColumn: string | null
+  /** прогон, открытый снаружи — например из истории экспериментов */
+  externalRunId?: string | null
+  /** сообщить оболочке, какой прогон открыт: от него зависят диагностика и применение */
+  onRunChanged?: (runId: string | null) => void
+  onUseModel?: (contenderKey: string) => void
 }
 
-export function ArenaView({ datasetId, targetColumn }: ArenaViewProps) {
-  const [runId, setRunId] = useState<string | null>(null)
+export function ArenaView({
+  datasetId,
+  targetColumn,
+  externalRunId,
+  onRunChanged,
+  onUseModel,
+}: ArenaViewProps) {
+  const [diagnosed, setDiagnosed] = useState<{ key: string; label: string } | null>(null)
+  const [runId, setRunId] = useState<string | null>(externalRunId ?? null)
+
+  useEffect(() => {
+    //прогон, открытый из истории, должен показываться здесь же, а не молча игнорироваться
+    if (externalRunId && externalRunId !== runId) {
+      setRunId(externalRunId)
+      setView(null)
+      setEvents([])
+      setDiagnosed(null)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalRunId])
   const [view, setView] = useState<RunView | null>(null)
   const [events, setEvents] = useState<RunEvent[]>([])
   const [failure, setFailure] = useState<ApiFailure | null>(null)
@@ -141,7 +166,9 @@ export function ArenaView({ datasetId, targetColumn }: ArenaViewProps) {
       setDuplicate(response.duplicate_of_active_run)
       setEvents([])
       setView(null)
+      setDiagnosed(null)
       setRunId(response.run.run_id)
+      onRunChanged?.(response.run.run_id)
     } catch (error: unknown) {
       setFailure(
         error instanceof ApiFailure
@@ -174,7 +201,9 @@ export function ArenaView({ datasetId, targetColumn }: ArenaViewProps) {
     }
   }
 
-  if (!datasetId || !targetColumn) {
+  //прогон, открытый из истории, показывается даже без свежеразобранной постановки:
+  //иначе «Открыть» из списка экспериментов приводило бы на пустой экран
+  if (!runId && (!datasetId || !targetColumn)) {
     return (
       <section className="panel">
         <h2>Прогон</h2>
@@ -185,6 +214,8 @@ export function ArenaView({ datasetId, targetColumn }: ArenaViewProps) {
       </section>
     )
   }
+
+  const canStart = Boolean(datasetId && targetColumn)
 
   const run = view?.run
   const progress = view?.progress
@@ -200,9 +231,19 @@ export function ArenaView({ datasetId, targetColumn }: ArenaViewProps) {
         </p>
 
         <div className="row">
-          <button type="button" className="primary" disabled={starting || view?.active} onClick={onStart}>
+          <button
+            type="button"
+            className="primary"
+            disabled={starting || view?.active || !canStart}
+            onClick={onStart}
+          >
             {starting ? 'Запускаем…' : 'Запустить прогон'}
           </button>
+          {!canStart ? (
+            <span className="muted">
+              показан прогон из истории; чтобы запустить новый, разберите постановку задачи
+            </span>
+          ) : null}
 
           {view?.active ? (
             <button type="button" disabled={cancelling} onClick={onCancel}>
@@ -225,7 +266,24 @@ export function ArenaView({ datasetId, targetColumn }: ArenaViewProps) {
         {run ? <RunHeader run={run} progress={progress} /> : null}
       </section>
 
-      {run ? <ContenderList contenders={run.contenders} /> : null}
+      {run ? (
+        <ContenderList
+          contenders={run.contenders}
+          onDiagnose={(key, label) => setDiagnosed({ key, label })}
+          onUseModel={onUseModel}
+        />
+      ) : null}
+      {run && diagnosed ? (
+        <DiagnosticsPanel
+          runId={run.run_id}
+          contenderKey={diagnosed.key}
+          label={diagnosed.label}
+          onClose={() => setDiagnosed(null)}
+        />
+      ) : null}
+      {run && run.state !== 'PENDING' ? (
+        <LeaderboardPanel runId={run.run_id} active={Boolean(view?.active)} />
+      ) : null}
       {journalBroken ? (
         <Notice
           level="caution"
@@ -287,7 +345,15 @@ function RunHeader({ run, progress }: { run: RunView['run']; progress?: RunView[
   )
 }
 
-function ContenderList({ contenders }: { contenders: ContenderRun[] }) {
+function ContenderList({
+  contenders,
+  onDiagnose,
+  onUseModel,
+}: {
+  contenders: ContenderRun[]
+  onDiagnose: (key: string, label: string) => void
+  onUseModel?: (key: string) => void
+}) {
   return (
     <section className="panel">
       <h2>Участники</h2>
@@ -298,15 +364,29 @@ function ContenderList({ contenders }: { contenders: ContenderRun[] }) {
 
       <ul className="contenders">
         {contenders.map((item) => (
-          <ContenderCard key={item.contender_key} contender={item} />
+          <ContenderCard
+            key={item.contender_key}
+            contender={item}
+            onDiagnose={onDiagnose}
+            onUseModel={onUseModel}
+          />
         ))}
       </ul>
     </section>
   )
 }
 
-function ContenderCard({ contender }: { contender: ContenderRun }) {
+function ContenderCard({
+  contender,
+  onDiagnose,
+  onUseModel,
+}: {
+  contender: ContenderRun
+  onDiagnose: (key: string, label: string) => void
+  onUseModel?: (key: string) => void
+}) {
   const cross = contender.metrics.find((part) => part.split === 'cv')
+  const finished = contender.state === 'SUCCEEDED'
 
   return (
     <li className={`contender ${contender.state.toLowerCase()}`}>
@@ -343,6 +423,22 @@ function ContenderCard({ contender }: { contender: ContenderRun }) {
 
       {contender.coverage && !contender.coverage.complete ? (
         <p className="hint">{contender.coverage.note}</p>
+      ) : null}
+
+      {finished ? (
+        <div className="row">
+          <button
+            type="button"
+            onClick={() => onDiagnose(contender.contender_key, contender.label)}
+          >
+            Диагностика
+          </button>
+          {onUseModel ? (
+            <button type="button" onClick={() => onUseModel(contender.contender_key)}>
+              Применить модель
+            </button>
+          ) : null}
+        </div>
       ) : null}
     </li>
   )

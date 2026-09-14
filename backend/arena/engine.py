@@ -29,7 +29,7 @@ from typing import Any
 
 import numpy as np
 
-from backend.arena.events import ArenaEvent, EventLog, Progress, now
+from backend.arena.events import ArenaEvent, EventLog, Progress, now, run_progress
 from backend.arena.spec import RunSpec
 from backend.arena.states import resolve_run_state
 from backend.arena.store import ContenderRecord, RunRecord, RunStore
@@ -123,17 +123,7 @@ class ArenaEngine:
         return self._cancel.is_set()
 
     def progress(self) -> Progress:
-        planned = [item for item in self._record.contenders if item.n_folds]
-        return Progress(
-            folds_completed=sum(item.folds_completed for item in planned),
-            folds_planned=sum(item.n_folds for item in planned),
-            contenders_finished=sum(
-                1
-                for item in self._record.contenders
-                if item.state in {"SUCCEEDED", "FAILED", "CANCELLED"}
-            ),
-            contenders_planned=len(planned),
-        )
+        return run_progress(self._record, n_splits=self._spec.n_splits)
 
     # ------------------------------------------------------------------ выполнение
 
@@ -276,6 +266,23 @@ class ArenaEngine:
             #два контендера по семь потоков должны дать четырнадцать рабочих потоков,
             #а не два захвата всех ядер
             "threads_per_fit": self._spec.budget.threads_per_fit,
+            #контекст, без которого сохранённая модель через месяц бесполезна:
+            #к какому снимку и протоколу она относится и что означает её выход
+            "run_id": self._record.run_id,
+            "label": contender.label,
+            "task": self._spec.task.to_dict(),
+            "dataset": {
+                "dataset_id": self._spec.dataset_id,
+                "fingerprint": self._spec.dataset_fingerprint,
+                "fingerprint_algorithm": "dataarena-logical-sha256-v1",
+            },
+            "protocol": {
+                "cv_splitter": self._spec.protocol.cv_splitter,
+                "n_splits": self._spec.n_splits,
+                "seed": self._spec.seed,
+                "fold_assignment_hash": self._spec.fold_assignment_hash,
+                "experiment_fingerprint": self._spec.experiment_fingerprint,
+            },
             "dataset_path": str(self._dataset_path),
             "folds_path": str(self._store.folds_path(self._record.run_id)),
             "staging_directory": str(staging),
@@ -470,6 +477,7 @@ class ArenaEngine:
             return
 
         record.folds_completed = max(record.folds_completed, len(payload.get("folds", [])))
+        record.artifact = payload.get("artifact")
 
         if worker.forced_exit:
             record.warnings = [

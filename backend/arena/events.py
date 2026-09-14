@@ -131,3 +131,24 @@ class Progress:
                 round(self.folds_completed / self.folds_planned, 4) if self.folds_planned else None
             ),
         }
+
+
+def run_progress(record: Any, *, n_splits: int) -> Progress:
+    """Прогресс прогона со **стабильным** знаменателем.
+
+    Знаменатель известен до старта: столько участников запланировано и столько фолдов
+    каждому предстоит. Считать его по уже запустившимся нельзя — тогда «завершено 8 из 2»
+    получается законно, а читается как бессмыслица, и доля прыгает по мере запуска.
+
+    Пропущенные по применимости участники в знаменатель не входят: их не собирались
+    запускать, и присутствие в нём делало бы прогон вечно неполным.
+    """
+    planned = [item for item in record.contenders if item.state != "SKIPPED"]
+    finished = [item for item in planned if item.state in {"SUCCEEDED", "FAILED", "CANCELLED"}]
+
+    return Progress(
+        folds_completed=sum(item.folds_completed for item in planned),
+        folds_planned=len(planned) * max(0, int(n_splits)),
+        contenders_finished=len(finished),
+        contenders_planned=len(planned),
+    )

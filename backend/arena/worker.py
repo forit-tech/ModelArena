@@ -34,6 +34,8 @@ THREAD_VARIABLES = (
 )
 #сколько ждать, пока последние события уйдут родителю, прежде чем завершать процесс
 EVENT_FLUSH_SECONDS = 5.0
+#сколько строк обучающей части берётся на замер разрыва train-vs-validation
+PROBE_ROWS = 2000
 RESULT_FILE = "result.json"
 PREDICTIONS_FILE = "predictions.parquet"
 TRACEBACK_FILE = "traceback.log"
@@ -166,6 +168,7 @@ def _train(payload: dict[str, Any], events: Any, staging: Path) -> dict[str, Any
         HOLDOUT_FOLD,
         SPLIT_CV,
         SPLIT_HOLDOUT,
+        SPLIT_TRAIN_PROBE,
         PredictionError,
         to_frame,
         validate_fold_predictions,
@@ -215,7 +218,7 @@ def _train(payload: dict[str, Any], events: Any, staging: Path) -> dict[str, Any
             )
 
         fold_started = time.monotonic()
-        prediction, missing = _fit_and_predict(
+        prediction, missing, fitted = _fit_and_predict(
             payload=payload,
             budget=budget,
             seed=seed,
@@ -234,6 +237,24 @@ def _train(payload: dict[str, Any], events: Any, staging: Path) -> dict[str, Any
             class_labels=class_labels,
         )
         parts.append(prediction)
+        #замер на обучающей части тем же конвейером: без него разрыв train-vs-validation
+        #пришлось бы не измерять, а предполагать. Берётся подвыборка, чтобы файл
+        #предсказаний не вырос вдвое ради диагностики
+        probe_index = _probe_subset(train_index, seed=seed + fold)
+
+        if probe_index.size:
+            parts.append(
+                _predict_only(
+                    payload=payload,
+                    pipeline=fitted,
+                    features=features,
+                    target=target,
+                    row_ids=row_ids,
+                    predict_index=probe_index,
+                    fold=fold,
+                    split=SPLIT_TRAIN_PROBE,
+                )
+            )
 
         if missing:
             warnings.append(
@@ -262,29 +283,37 @@ def _train(payload: dict[str, Any], events: Any, staging: Path) -> dict[str, Any
 
     holdout_index = splits["holdout"]
     train_pool = splits["train_pool"]
+    #финальная модель обучается на всём обучающем пуле — именно она сохраняется
+    #артефактом и именно она даёт holdout-предсказания. Одно обучение, а не два:
+    #иначе сохранённая модель отличалась бы от той, по которой считалось подтверждение
+    final_prediction, _, final_pipeline = _fit_and_predict(
+        payload=payload,
+        budget=budget,
+        seed=seed,
+        features=features,
+        target=target,
+        row_ids=row_ids,
+        train_index=train_pool,
+        predict_index=holdout_index if holdout_index.size else train_pool[:1],
+        fold=HOLDOUT_FOLD,
+        split=SPLIT_HOLDOUT,
+    )
 
     if holdout_index.size:
         #holdout считается один раз в самом конце и только как подтверждение: ни отбор
         #участников, ни подбор порога на него не опираются
-        prediction, _ = _fit_and_predict(
-            payload=payload,
-            budget=budget,
-            seed=seed,
-            features=features,
-            target=target,
-            row_ids=row_ids,
-            train_index=train_pool,
-            predict_index=holdout_index,
-            fold=HOLDOUT_FOLD,
-            split=SPLIT_HOLDOUT,
-        )
         validate_fold_predictions(
-            prediction,
+            final_prediction,
             expected_rows=len(holdout_index),
             task_type=task_type,
             class_labels=class_labels,
         )
-        parts.append(prediction)
+        parts.append(final_prediction)
+
+    artifact = _store_artifact(payload, staging, final_pipeline, features, int(train_pool.size))
+
+    if artifact and artifact.get("error"):
+        warnings.append(artifact["error"])
 
     frame = to_frame(parts, task_type=task_type, class_labels=class_labels)
 
@@ -312,8 +341,78 @@ def _train(payload: dict[str, Any], events: Any, staging: Path) -> dict[str, Any
         "coverage": coverage.to_dict(),
         "warnings": warnings,
         "holdout_rows": int(holdout_index.size),
+        "artifact": None if not artifact or artifact.get("error") else {
+            "model_sha256": artifact["model_sha256"],
+            "model_bytes": artifact["model_bytes"],
+            "format_version": artifact["format_version"],
+            "training_rows": artifact["training_rows"],
+        },
         "elapsed_seconds": round(time.monotonic() - started, 3),
     }
+
+
+def _probe_subset(train_index: Any, *, seed: int) -> Any:
+    """Подвыборка обучающей части для замера разрыва train-vs-validation.
+
+    Весь обучающий набор брать незачем: разрыв — это сравнение уровней, а не поимённый
+    разбор, и лишние строки только удваивают файл предсказаний. Выборка детерминирована
+    по seed, чтобы повторный прогон той же спецификации дал тот же замер.
+    """
+    import numpy as np
+
+    if train_index.size <= PROBE_ROWS:
+        return train_index
+
+    generator = np.random.default_rng(seed)
+    chosen = generator.choice(train_index.size, size=PROBE_ROWS, replace=False)
+    return np.sort(train_index[chosen])
+
+
+def _store_artifact(
+    payload: dict[str, Any], staging: Path, pipeline: Any, features: Any, training_rows: int
+) -> dict[str, Any] | None:
+    """Сохранить обученную модель вместе со всем, без чего она бесполезна.
+
+    Отказ записи артефакта **не роняет контендера**: предсказания и метрики уже посчитаны
+    и остаются годными. Но и молча пропасть он не имеет права — причина возвращается
+    в результат и доходит до карточки прогона.
+    """
+    from datetime import UTC, datetime
+
+    from backend.artifacts.manifest import FeatureSchema, build_manifest, write_artifact
+    from backend.preprocessing.profiles import split_feature_types
+
+    types = split_feature_types(features)
+    schema = FeatureSchema(
+        #порядок колонок фиксируется явно: файл на входе может прийти с другим
+        columns=list(features.columns),
+        dtypes={name: str(features[name].dtype) for name in features.columns},
+        numeric=types.numeric,
+        categorical=types.categorical,
+        datetime=types.datetime,
+    )
+
+    try:
+        return write_artifact(
+            staging,
+            pipeline,
+            build_manifest(
+                run_id=payload["run_id"],
+                contender_key=payload["contender_key"],
+                adapter_key=payload["adapter_key"],
+                label=payload["label"],
+                params=dict(payload["params"]),
+                preprocessing_profile=payload["preprocessing_profile"],
+                task=payload["task"],
+                dataset=payload["dataset"],
+                protocol=payload["protocol"],
+                schema=schema,
+                training_rows=training_rows,
+                created_at=datetime.now(UTC).isoformat(timespec="seconds"),
+            ),
+        )
+    except (OSError, ValueError, TypeError, AttributeError) as error:
+        return {"error": f"Артефакт модели не сохранён: {type(error).__name__}."}
 
 
 def _load_matrix(payload: dict[str, Any]) -> tuple[Any, Any]:
@@ -353,8 +452,14 @@ def _fit_and_predict(
     predict_index: Any,
     fold: int,
     split: str,
-) -> tuple[Any, list[str]]:
+) -> tuple[Any, list[str], Any]:
     """Обучить на переданной части и предсказать на проверочной.
+
+    Третьим значением возвращается **обученный конвейер**. Он нужен, чтобы одним обучением
+    закрыть три вещи сразу: предсказание на проверочной части, замер на обучающей части
+    (для разрыва train-vs-validation) и сохранение артефакта. Повторное обучение ради
+    каждой из них стоило бы втрое дороже и, что важнее, давало бы **другую** модель —
+    и замеры относились бы не к тому объекту, который потом сохраняется.
 
     Препроцессор и модель собираются **заново на каждый фолд**. Переиспользованный
     трансформер принёс бы в следующий фолд статистики предыдущего — ровно та утечка,
@@ -448,4 +553,65 @@ def _fit_and_predict(
             proba=proba,
         ),
         missing,
+        pipeline,
+    )
+
+
+def _predict_only(
+    *,
+    payload: dict[str, Any],
+    pipeline: Any,
+    features: Any,
+    target: Any,
+    row_ids: Any,
+    predict_index: Any,
+    fold: int,
+    split: str,
+) -> Any:
+    """Предсказать уже обученным конвейером, ничего не обучая.
+
+    Используется для замера на обучающей части фолда. Эти строки модель видела при
+    обучении, поэтому результат по ним **завышен по построению** — он и нужен именно
+    таким: разрыв между ним и проверочной частью и есть мера переобучения. В ранжировании
+    такие строки не участвуют никогда: они помечены отдельным `split`.
+    """
+    import numpy as np
+
+    from backend.arena.predictions import FoldPredictions, align_probabilities
+
+    task_type = payload["task_type"]
+    predict_features = features.iloc[predict_index]
+
+    try:
+        predicted = np.asarray(pipeline.predict(predict_features))
+    except Exception as error:
+        raise ContenderError(
+            "prediction_failed",
+            f"Замер на обучающей части не удался: {type(error).__name__}.",
+        ) from error
+
+    proba: Any = None
+
+    if task_type != "regression" and payload["supports_proba"]:
+        try:
+            raw = np.asarray(pipeline.predict_proba(predict_features))
+        except (AttributeError, NotImplementedError):
+            raw = None
+
+        if raw is not None:
+            model_classes = [str(value) for value in pipeline.named_steps["model"].classes_]
+            proba, _ = align_probabilities(raw, model_classes, payload["class_labels"])
+
+    if task_type == "regression":
+        prepared = np.asarray(predicted, dtype=np.float64)
+    else:
+        prepared = np.asarray([str(value) for value in predicted], dtype=object)
+
+    return FoldPredictions(
+        row_ids=row_ids[predict_index],
+        fold=fold,
+        split=split,
+        y_true=target[predict_index],
+        y_pred=prepared,
+        proba=proba,
     )

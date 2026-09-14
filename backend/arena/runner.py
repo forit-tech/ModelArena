@@ -23,7 +23,7 @@ import numpy as np
 import polars as pl
 
 from backend.arena.engine import ArenaEngine, write_folds
-from backend.arena.events import ArenaEvent, EventLog, Progress, now
+from backend.arena.events import ArenaEvent, EventLog, Progress, now, run_progress
 from backend.arena.spec import (
     DEFAULT_CONTENDER_TIMEOUT_SECONDS,
     DEFAULT_RUN_TIMEOUT_SECONDS,
@@ -175,9 +175,42 @@ class ArenaRunner:
         thread.start()
         return record, False
 
+    def _summarise(self, run_id: str) -> None:
+        """Записать вердикт о чемпионе по цели по умолчанию.
+
+        Считается один раз, при завершении, чтобы список экспериментов не перечитывал
+        предсказания всех участников всех прогонов. Смена цели пересчитывает таблицу
+        на лету и новым экспериментом не становится.
+        """
+        from backend.scoring.leaderboard import build_leaderboard
+        from backend.scoring.objective import default_objective
+
+        try:
+            record = self._store.get(run_id)
+            task_type = str((record.spec.get("task") or {}).get("task_type", ""))
+            objective = default_objective(task_type)
+            board = build_leaderboard(record=record, store=self._store, objective=objective)
+            record.summary = {
+                "objective": objective.metric,
+                "objective_description": objective.describe(),
+                "contender_key": board.champion.contender_key,
+                "label": board.champion.label,
+                "reason": board.champion.reason,
+                "score": next(
+                    (row.score for row in board.rows if row.contender_key == board.champion.contender_key),
+                    None,
+                ),
+            }
+            self._store.save(record)
+        except Exception:
+            #вердикт — производная величина: её отсутствие не должно ронять прогон,
+            #но и проглатывать причину нельзя
+            logger.exception("Вердикт о чемпионе для %s не посчитался", run_id)
+
     def _execute(self, run_id: str, engine: ArenaEngine) -> None:
         try:
             engine.execute()
+            self._summarise(run_id)
         except BaseException:
             #поток прогона не должен умирать молча: без записи состояние осталось бы
             #RUNNING навсегда, а причина не попала бы никуда
@@ -239,17 +272,7 @@ class ArenaRunner:
             return active.engine.progress()
 
         record = self._store.get(run_id)
-        planned = [item for item in record.contenders if item.n_folds]
-        return Progress(
-            folds_completed=sum(item.folds_completed for item in planned),
-            folds_planned=sum(item.n_folds for item in planned),
-            contenders_finished=sum(
-                1
-                for item in record.contenders
-                if item.state in {"SUCCEEDED", "FAILED", "CANCELLED"}
-            ),
-            contenders_planned=len(planned),
-        )
+        return run_progress(record, n_splits=int(record.spec.get("n_splits", 0)))
 
     def events(self, run_id: str, since: int = 0) -> list[ArenaEvent]:
         with self._lock:

@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from backend.api.routes import arena, datasets, health, tasks
+from backend.api.routes import arena, datasets, experiments, health, models, tasks
 from backend.core.config import get_settings
 from backend.core.errors import AppError, build_error_payload
 
@@ -46,7 +46,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    for module in (health, datasets, tasks, arena):
+    for module in (health, datasets, tasks, arena, models, experiments):
         app.include_router(module.router, prefix="/api")
 
     _register_error_handlers(app)

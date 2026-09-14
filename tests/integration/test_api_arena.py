@@ -183,3 +183,52 @@ def test_cancelling_a_finished_run_is_refused(client: TestClient, dataset_id: st
 
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "validation_error"
+
+
+def test_leaderboard_recomputes_under_a_new_objective_without_retraining(
+    client: TestClient, dataset_id: str
+) -> None:
+    """Смена цели даёт другую таблицу и не запускает ни одного обучения (D-6)."""
+    run_id = _start(client, dataset_id).json()["run"]["run_id"]
+    assert _finish(client, run_id)["run"]["state"] == "SUCCEEDED"
+
+    default = client.get(f"/api/arena/runs/{run_id}/leaderboard")
+    assert default.status_code == 200, default.text
+    board = default.json()["leaderboard"]
+    assert board["objective"]["metric"] == "roc_auc"
+    assert board["rows"]
+    #каждая строка объясняет своё место, а не просто несёт число
+    assert any(row["versus_baseline"] for row in board["rows"] if not row["is_baseline"])
+
+    custom = client.post(
+        f"/api/arena/runs/{run_id}/leaderboard",
+        json={
+            "metric": "recall",
+            "constraints": [
+                {
+                    "metric": "precision",
+                    "operator": "gte",
+                    "value": 0.99,
+                    "reason": "ложная тревога дорого стоит",
+                }
+            ],
+        },
+    )
+    assert custom.status_code == 200, custom.text
+    changed = custom.json()["leaderboard"]
+    assert changed["objective"]["metric"] == "recall"
+    assert changed["objective"]["constraints"][0]["metric"] == "precision"
+    #история прогонов не пополнилась: обучение не повторялось
+    assert len(client.get("/api/arena/runs").json()["runs"]) == 1
+
+
+def test_leaderboard_refuses_a_metric_the_task_does_not_have(
+    client: TestClient, dataset_id: str
+) -> None:
+    run_id = _start(client, dataset_id).json()["run"]["run_id"]
+    _finish(client, run_id)
+
+    response = client.get(f"/api/arena/runs/{run_id}/leaderboard", params={"metric": "rmse"})
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "validation_error"

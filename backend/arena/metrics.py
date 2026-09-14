@@ -110,6 +110,26 @@ def metric_keys(task_type: str) -> list[str]:
     return ["rmse", "mae", "r2", "mape"]
 
 
+def direction_of(key: str) -> Direction:
+    """Куда метрика «лучше»: `higher` или `lower`.
+
+    Знак берётся из одной таблицы, а не угадывается по имени метрики: `log_loss`
+    и `roc_auc` отличаются направлением, и ошибка здесь перевернула бы весь порядок
+    в таблице, оставив числа правдоподобными.
+    """
+    if key not in _LABELS:
+        raise KeyError(f"Неизвестная метрика: {key}")
+
+    return _LABELS[key][1]
+
+
+def label_of(key: str) -> str:
+    if key not in _LABELS:
+        raise KeyError(f"Неизвестная метрика: {key}")
+
+    return _LABELS[key][0]
+
+
 def primary_metric(task_type: str) -> str:
     #ранжирование опирается на одну заранее объявленную метрику, а не на ту,
     #по которой победитель выглядит лучше

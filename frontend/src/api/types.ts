@@ -248,3 +248,76 @@ export interface RunSummary {
   experiment_fingerprint: string
   contenders: { planned: number; succeeded: number; failed: number; skipped: number }
 }
+
+export interface PairedComparison {
+  leader: string
+  trailing: string
+  metric: string
+  mean_difference: number
+  std_difference: number
+  folds_compared: number
+  folds_won: number
+  /** false означает «разница не держится на разбиении», а не «проиграл» */
+  stable: boolean
+  explanation: string
+}
+
+export interface ConstraintStatus {
+  description: string
+  metric: string
+  observed: number | null
+  /** null — проверить не удалось; это не то же самое, что «не прошёл» */
+  satisfied: boolean | null
+}
+
+export interface LeaderboardRow {
+  contender_key: string
+  label: string
+  family: string
+  is_baseline: boolean
+  /** null — участник в ранжировании не участвует, причина в reason */
+  rank: number | null
+  score: number | null
+  std: number | null
+  per_fold: (number | null)[]
+  estimated_cost: number
+  cross_validated: MetricValue[]
+  holdout: MetricValue[]
+  constraints: ConstraintStatus[]
+  eligible: boolean
+  reason: string
+  versus_next: PairedComparison | null
+  versus_baseline: PairedComparison | null
+}
+
+export interface ChampionVerdict {
+  /** null означает «чемпион не выбран», и reason объясняет почему */
+  contender_key: string | null
+  label: string
+  reason: string
+  over_baseline: PairedComparison | null
+  over_runner_up: PairedComparison | null
+  decided_by_tie_breaker: string
+}
+
+export interface Leaderboard {
+  objective: {
+    metric: string
+    task_type: string
+    higher_is_better: boolean
+    constraints: { description: string; metric: string }[]
+    tie_breakers: { key: string; rule: string }[]
+    min_gain_over_baseline: number
+    description: string
+  }
+  rows: LeaderboardRow[]
+  champion: ChampionVerdict
+  baseline_key: string | null
+  notes: string[]
+}
+
+export interface LeaderboardResponse {
+  run_id: string
+  run_state: RunState
+  leaderboard: Leaderboard
+}

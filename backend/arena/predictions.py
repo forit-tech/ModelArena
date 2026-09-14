@@ -21,6 +21,11 @@ import polars as pl
 ROW_ID = "__row_id__"
 SPLIT_CV = "cv"
 SPLIT_HOLDOUT = "holdout"
+#замер на обучающей части фолда: строки, которые модель видела при обучении.
+#Результат по ним завышен ПО ПОСТРОЕНИЮ, и в ранжировании они не участвуют никогда —
+#их единственное назначение в том, чтобы разрыв train-vs-validation можно было измерить,
+#а не предположить
+SPLIT_TRAIN_PROBE = "train_probe"
 HOLDOUT_FOLD = -1
 PROBA_PREFIX = "proba__"
 

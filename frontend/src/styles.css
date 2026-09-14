@@ -159,3 +159,104 @@ th { color: var(--text-dim); font-weight: 500; }
   max-height: 320px;
   overflow-y: auto;
 }
+
+/* ---------------------------------------------------------------- таблица результатов */
+
+.leaderboard {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-top: 12px;
+}
+
+.leaderboard th,
+.leaderboard td {
+  text-align: left;
+  padding: 7px 10px 7px 0;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.leaderboard th {
+  font-weight: 500;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.leaderboard .baseline-row td {
+  opacity: 0.75;
+}
+
+/* «неразличимы» — не ошибка и не проигрыш, поэтому не красный, а приглушённый:
+   цвет не должен подсказывать вывод, которого в данных нет */
+.indistinguishable {
+  color: var(--muted);
+}
+
+.stable {
+  color: var(--ok, #2f855a);
+}
+
+.subhead {
+  font-size: 14px;
+  margin: 20px 0 4px;
+}
+
+/* ---------------------------------------------------------------- диагностика */
+
+.row.spread {
+  justify-content: space-between;
+  align-items: center;
+}
+
+.evidence {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  background: rgba(127, 127, 127, 0.08);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-x: auto;
+}
+
+.bar-cell {
+  width: 40%;
+  min-width: 120px;
+}
+
+.bar {
+  display: inline-block;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--accent, #3182ce);
+  min-width: 2px;
+}
+
+/* отрицательная важность означает шум, а не вред: цвет не должен читаться как «плохо» */
+.bar.negative {
+  background: var(--muted);
+  opacity: 0.5;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.form-grid input {
+  padding: 6px 8px;
+}
+
+details > summary {
+  cursor: pointer;
+  margin-top: 8px;
+}

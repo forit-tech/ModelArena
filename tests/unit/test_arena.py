@@ -590,3 +590,73 @@ def test_event_log_reads_back_what_it_wrote(tmp_path: Path) -> None:
     payloads = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
     assert [item["kind"] for item in payloads] == ["run_started", "fold_completed"]
     assert log.snapshot(since=1)[0].fold == 1
+
+
+def test_progress_denominator_is_known_before_the_run_starts() -> None:
+    """«Завершено 8 из 2» — законная арифметика и бессмысленное утверждение.
+
+    Знаменатель, посчитанный по уже запустившимся участникам, растёт по ходу прогона:
+    доля прыгает, а после отмены числитель обгоняет знаменатель. Планируемое известно
+    заранее, и считать надо по нему.
+    """
+    from backend.arena.events import run_progress
+
+    record = RunRecord(
+        run_id=new_run_id(),
+        created_at="2026-09-14T00:00:00+00:00",
+        state="CANCELLED",
+        spec={"n_splits": 5},
+        contenders=[
+            #два успели поработать, четверо отменены не начав, двое пропущены по составу
+            ContenderRecord(
+                contender_key="a",
+                label="A",
+                family="linear",
+                preprocessing_profile="scaled_onehot",
+                is_baseline=True,
+                state="SUCCEEDED",
+                folds_completed=5,
+                n_folds=5,
+            ),
+            ContenderRecord(
+                contender_key="b",
+                label="B",
+                family="linear",
+                preprocessing_profile="scaled_onehot",
+                is_baseline=False,
+                state="CANCELLED",
+                folds_completed=1,
+                n_folds=5,
+            ),
+            *[
+                ContenderRecord(
+                    contender_key=f"c{index}",
+                    label=f"C{index}",
+                    family="linear",
+                    preprocessing_profile="scaled_onehot",
+                    is_baseline=False,
+                    state="CANCELLED",
+                )
+                for index in range(4)
+            ],
+            *[
+                ContenderRecord(
+                    contender_key=f"s{index}",
+                    label=f"S{index}",
+                    family="gbdt",
+                    preprocessing_profile="native_missing",
+                    is_baseline=False,
+                    state="SKIPPED",
+                )
+                for index in range(2)
+            ],
+        ],
+    )
+    progress = run_progress(record, n_splits=5)
+
+    #шесть запланированных: пропущенные по применимости в знаменатель не входят
+    assert progress.contenders_planned == 6
+    assert progress.contenders_finished == 6
+    assert progress.contenders_finished <= progress.contenders_planned
+    assert progress.folds_planned == 30
+    assert progress.folds_completed == 6

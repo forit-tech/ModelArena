@@ -74,6 +74,9 @@ class ContenderRecord:
     finished_at: str | None = None
     elapsed_seconds: float | None = None
     coverage: dict[str, Any] | None = None
+    #сведения о сохранённой модели: контрольная сумма и размер. None означает,
+    #что артефакта нет — и причина тогда лежит в warnings
+    artifact: dict[str, Any] | None = None
     warnings: list[str] = field(default_factory=list)
     metrics: list[dict[str, Any]] = field(default_factory=list)
 
@@ -94,6 +97,9 @@ class RunRecord:
     cancel_requested: bool = False
     error_code: str | None = None
     error_message: str = ""
+    #вердикт о чемпионе по цели по умолчанию, посчитанный один раз при завершении.
+    #Пересчёт под другую цель — это чтение тех же предсказаний, а не новый эксперимент
+    summary: dict[str, Any] | None = None
     notes: list[str] = field(default_factory=list)
 
     @property
@@ -117,6 +123,7 @@ class RunRecord:
             "cancel_requested": self.cancel_requested,
             "error_code": self.error_code,
             "error_message": self.error_message,
+            "summary": self.summary,
             "notes": self.notes,
             "owner_token": self.owner_token,
             "spec": self.spec,
@@ -142,6 +149,7 @@ class RunRecord:
             cancel_requested=bool(payload.get("cancel_requested", False)),
             error_code=payload.get("error_code"),
             error_message=payload.get("error_message", ""),
+            summary=payload.get("summary"),
             notes=list(payload.get("notes", [])),
         )
 
@@ -239,6 +247,10 @@ class RunStore:
 
     def folds_path(self, run_id: str) -> Path:
         return self.directory(run_id) / FOLDS_FILE
+
+    def contender_path(self, run_id: str, contender_key: str) -> Path:
+        """Каталог опубликованного результата участника: предсказания и артефакт модели."""
+        return self.directory(run_id) / CONTENDERS_DIR / _safe_key(contender_key)
 
     def predictions_path(self, run_id: str, contender_key: str) -> Path:
         from backend.arena.worker import PREDICTIONS_FILE

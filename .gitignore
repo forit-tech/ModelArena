@@ -19,7 +19,9 @@ dist/
 .env
 .dataarena/
 workspaces/
-artifacts/
+# каталог прогонов в корне репозитория, а НЕ пакет backend/artifacts с исходным кодом:
+# без ведущего слэша правило съедало модуль, и клон репозитория не собирался бы
+/artifacts/
 output/
 
 # Tooling

@@ -7,6 +7,7 @@ import type {
   RunCard,
   RunEvent,
   RunSummary,
+  LeaderboardResponse,
   RunView,
   StartRunResponse,
 } from './types'
@@ -57,3 +58,8 @@ export const getRunEvents = (runId: string, since = 0) =>
 
 export const cancelRun = (runId: string) =>
   request<{ run: RunCard }>(`/api/arena/runs/${runId}/cancel`, { method: 'POST' })
+
+export const getLeaderboard = (runId: string, metric?: string) =>
+  request<LeaderboardResponse>(
+    `/api/arena/runs/${runId}/leaderboard${metric ? `?metric=${encodeURIComponent(metric)}` : ''}`,
+  )

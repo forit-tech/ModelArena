@@ -23,15 +23,15 @@
 | 3 | Protocol + preprocessing profiles + гарантии честности | перенос + новое |
 | 4 | Adapter registry + baseline + ядро моделей | новое (замена `catalog.py`) — **закрыт** |
 | 5 | Arena engine + jobs + resource budget | новое (замена `trainer.py`) — **закрыт** |
-| 6 | Metrics + CV aggregation + Leaderboard + Champion | перенос + новое |
+| 6 | Metrics + CV aggregation + Leaderboard + Champion | перенос + новое — **закрыт** |
 | 7 | Head-to-Head | новое |
-| 8 | Diagnostics: overfitting, learning curves, calibration, error analysis | перенос + новое |
-| 9 | Experiment tracking + `experiment.yaml` | перенос + новое |
+| 8 | Diagnostics: overfitting, learning curves, calibration, error analysis | перенос + новое — **закрыт** |
+| 9 | Experiment tracking (история и сравнение прогонов) | перенос + новое — **закрыт**; `experiment.yaml` отложен |
 | 10 | Optuna tuning финалистов | новое |
-| 11 | Model export bundle | перенос + новое |
+| 11 | Model export bundle + применение к новым данным | перенос + новое — **закрыт** |
 | 12 | Интеграция с DataArena (импорт по URL, deep links) | новое |
 | 13 | Drift / сравнение с будущим датасетом | перенос + новое |
-| 14 | Failure slices, SHAP (опц.), производительность, README | новое |
+| 14 | Failure slices, SHAP (опц.), производительность, README | новое — README закрыт, SHAP сознательно не вошёл |
 
 Граница MVP проходит **после этапа 9** (см. §9).
 
@@ -570,6 +570,17 @@ GET    /api/arena/runs/{id}                     карточка + прогре�
 GET    /api/arena/runs/{id}/contenders          участники со статусами        (Stage 5, готово)
 GET    /api/arena/runs/{id}/events?since=N      журнал событий                (Stage 5, готово)
 POST   /api/arena/runs/{id}/cancel              остановка                     (Stage 5, готово)
+GET    /api/arena/runs/{id}/leaderboard         таблица по цели по умолчанию  (Stage 6, готово)
+POST   /api/arena/runs/{id}/leaderboard         таблица по заданной цели      (Stage 6, готово)
+GET    .../contenders/{key}/diagnostics         разрыв, устойчивость, классы  (Stage 8, готово)
+GET    .../contenders/{key}/errors              ошибочные строки              (Stage 8, готово)
+GET    .../contenders/{key}/learning-curve      кривая обучения               (Stage 8, готово)
+GET    /api/models/{run}/{key}                  манифест модели               (Stage 11, готово)
+GET    /api/models/{run}/{key}/importance       влияние признаков             (Stage 8, готово)
+POST   /api/models/{run}/{key}/predict          предсказание по строке        (Stage 11, готово)
+POST   /api/models/{run}/{key}/predict-batch    предсказание по файлу         (Stage 11, готово)
+GET    /api/experiments                         история экспериментов         (Stage 9, готово)
+POST   /api/experiments/compare                 сравнение прогонов            (Stage 9, готово)
 GET    /api/runs/{id}/leaderboard?objective=…   пересчёт без обучения (D-6)   (Stage 6)
 GET    /api/runs/{id}/head-to-head?a=&b=                                      (Stage 7)
 GET    /api/runs/{id}/rows?bucket=…             строки под сегментом          (Stage 7)
