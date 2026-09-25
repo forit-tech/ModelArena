@@ -108,10 +108,49 @@ export interface ReadinessReport {
   findings: ReadinessFinding[]
 }
 
+export type LeakageEvidenceLevel = 'structural' | 'evidence' | 'heuristic'
+export type LeakageRisk = 'none' | 'suspected' | 'high' | 'confirmed'
+
+export interface LeakageSignal {
+  code: string
+  evidence_level: LeakageEvidenceLevel
+  scope: string
+  columns: string[]
+  observed_value: unknown
+  threshold: string
+  explanation: string
+  mechanism: string
+  suggested_action: string
+  blocking: boolean
+}
+
+export interface LeakageNotEvaluated {
+  check: string
+  scope: string
+  reason: string
+  consequence: string
+}
+
+export interface LeakageReport {
+  risk: LeakageRisk
+  summary: string
+  signals: LeakageSignal[]
+  /** Невыполненная проверка не равна чистому результату и обязана быть видимой в UI. */
+  not_evaluated: LeakageNotEvaluated[]
+  disclaimer: string
+}
+
 export interface AnalyzeResponse {
   task: TaskProposal
   protocol: ProtocolProposal
   readiness: ReadinessReport
+  leakage: LeakageReport
+}
+
+export interface RunAnalysisResponse {
+  run_id: string
+  analysis: { readiness: ReadinessReport; leakage: LeakageReport } | null
+  note: string
 }
 
 export interface DatasetCard {
@@ -177,6 +216,12 @@ export interface ContenderRun {
   started_at: string | null
   finished_at: string | null
   elapsed_seconds: number | null
+  artifact: {
+    model_sha256: string
+    model_bytes: number
+    format_version: string
+    training_rows: number
+  } | null
   coverage: { covered_rows: number; expected_rows: number; complete: boolean; note: string } | null
   warnings: string[]
   metrics: MetricSet[]
@@ -280,7 +325,12 @@ export interface LeaderboardRow {
   score: number | null
   std: number | null
   per_fold: (number | null)[]
+  /** Априорная оценка до запуска, не измеренное время. */
   estimated_cost: number
+  /** Фактическое wall-clock время завершённого участника. */
+  elapsed_seconds: number | null
+  /** Размер сохранённого модельного артефакта; null, если артефакт не создан. */
+  model_bytes: number | null
   cross_validated: MetricValue[]
   holdout: MetricValue[]
   constraints: ConstraintStatus[]

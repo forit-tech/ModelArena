@@ -14,11 +14,12 @@
  */
 import { useState } from 'react'
 
-import { getLeaderboard } from '../../api/endpoints'
+import { getLeaderboard, getRunAnalysis } from '../../api/endpoints'
 import type { LeaderboardRow, PairedComparison } from '../../api/types'
 import { FailureNotice } from '../../components/FailureNotice'
 import { Notice } from '../../components/Notice'
 import { useRequest } from '../../hooks/useRequest'
+import { LeakagePanel } from '../leakage/LeakagePanel'
 
 interface LeaderboardPanelProps {
   runId: string | null
@@ -32,6 +33,10 @@ export function LeaderboardPanel({ runId, active }: LeaderboardPanelProps) {
     runId ? () => getLeaderboard(runId, metric || undefined) : null,
     [runId, metric, active],
   )
+  const analysis = useRequest(
+    runId ? () => getRunAnalysis(runId) : null,
+    [runId],
+  )
 
   if (!runId) {
     return null
@@ -40,9 +45,30 @@ export function LeaderboardPanel({ runId, active }: LeaderboardPanelProps) {
   const data = board.data?.leaderboard
   const ranked = data?.rows.filter((row) => row.rank !== null) ?? []
   const excluded = data?.rows.filter((row) => row.rank === null) ?? []
+  const leakage = analysis.data?.analysis?.leakage
 
   return (
-    <section className="panel">
+    <>
+      {leakage ? <LeakagePanel report={leakage} context="run" /> : null}
+      {analysis.failure ? (
+        <section className="panel">
+          <h2>Проверка утечек</h2>
+          <FailureNotice failure={analysis.failure} onRetry={analysis.reload} />
+        </section>
+      ) : null}
+      {analysis.data && !analysis.data.analysis ? (
+        <section className="panel">
+          <h2>Проверка утечек</h2>
+          <Notice
+            level="caution"
+            title="Снимок проверки недоступен"
+            why={analysis.data.note || 'Для этого прогона анализ не сохранён.'}
+            action="Не трактуйте отсутствие панели как подтверждение чистоты данных."
+          />
+        </section>
+      ) : null}
+
+      <section className="panel">
       <h2>Таблица результатов</h2>
 
       {data ? (
@@ -92,6 +118,9 @@ export function LeaderboardPanel({ runId, active }: LeaderboardPanelProps) {
                 <th>#</th>
                 <th>Участник</th>
                 <th>{metricLabel(data, metric)}</th>
+                <th>Обучение · измерено</th>
+                <th>Артефакт · измерено</th>
+                <th>Оценка до запуска · усл. ед.</th>
                 <th>Против следующего</th>
                 <th>Против точки отсчёта</th>
               </tr>
@@ -110,6 +139,9 @@ export function LeaderboardPanel({ runId, active }: LeaderboardPanelProps) {
                     ) : null}
                   </td>
                   <td>{formatScore(row)}</td>
+                  <td>{formatDuration(row.elapsed_seconds)}</td>
+                  <td>{formatBytes(row.model_bytes)}</td>
+                  <td>{row.estimated_cost.toFixed(2)} усл. ед.</td>
                   <td>
                     <Verdict comparison={row.versus_next} />
                   </td>
@@ -138,6 +170,11 @@ export function LeaderboardPanel({ runId, active }: LeaderboardPanelProps) {
                   {row.score !== null ? (
                     <span className="muted">результат есть: {row.score.toFixed(4)}</span>
                   ) : null}
+                  <span className="muted">
+                    обучение: {formatDuration(row.elapsed_seconds)} · артефакт:{' '}
+                    {formatBytes(row.model_bytes)} · оценка до запуска:{' '}
+                    {row.estimated_cost.toFixed(2)} усл. ед.
+                  </span>
                 </div>
                 <p className="contender-reason">{row.reason}</p>
               </li>
@@ -151,7 +188,8 @@ export function LeaderboardPanel({ runId, active }: LeaderboardPanelProps) {
           {note}
         </p>
       ))}
-    </section>
+      </section>
+    </>
   )
 }
 
@@ -202,6 +240,34 @@ function formatScore(row: LeaderboardRow): string {
   }
 
   return row.std === null ? row.score.toFixed(4) : `${row.score.toFixed(4)} ± ${row.std.toFixed(4)}`
+}
+
+function formatDuration(value: number | null): string {
+  if (value === null) {
+    return '—'
+  }
+
+  if (value < 1) {
+    return `${Math.round(value * 1000)} мс`
+  }
+
+  return `${value.toFixed(value < 10 ? 2 : 1)} с`
+}
+
+function formatBytes(value: number | null): string {
+  if (value === null) {
+    return 'нет артефакта'
+  }
+
+  if (value < 1024) {
+    return `${value} Б`
+  }
+
+  if (value < 1024 ** 2) {
+    return `${(value / 1024).toFixed(1)} КБ`
+  }
+
+  return `${(value / 1024 ** 2).toFixed(1)} МБ`
 }
 
 function metricLabel(

@@ -4,6 +4,7 @@ import type {
   DatasetCard,
   DatasetSnapshot,
   PreviewPage,
+  RunAnalysisResponse,
   RunCard,
   RunEvent,
   RunSummary,
@@ -49,6 +50,9 @@ export const startRun = (datasetId: string, targetColumn: string, selected: stri
   })
 
 export const getRun = (runId: string) => request<RunView>(`/api/arena/runs/${runId}`)
+
+export const getRunAnalysis = (runId: string) =>
+  request<RunAnalysisResponse>(`/api/arena/runs/${runId}/analysis`)
 
 export const listRuns = () =>
   request<{ runs: RunSummary[] }>('/api/arena/runs')

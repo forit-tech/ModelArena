@@ -232,3 +232,20 @@ def test_leaderboard_refuses_a_metric_the_task_does_not_have(
 
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "validation_error"
+
+
+
+def test_run_analysis_keeps_leakage_uncertainty(
+    client: TestClient, dataset_id: str
+) -> None:
+    """Снимок прогона сохраняет и неопределённость Guard, а не только находки."""
+    run_id = _start(client, dataset_id).json()["run"]["run_id"]
+
+    response = client.get(f"/api/arena/runs/{run_id}/analysis")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["analysis"] is not None
+    leakage = payload["analysis"]["leakage"]
+    assert isinstance(leakage["not_evaluated"], list)
+    assert "не может доказать" in leakage["disclaimer"]
