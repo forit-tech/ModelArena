@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from fastapi import APIRouter, Response
@@ -128,6 +129,42 @@ def get_contenders(run_id: str) -> dict[str, Any]:
     record = get_runner().get(run_id)
     #упавшие и пропущенные остаются в списке: исчезнув, они выглядели бы проигравшими
     return {"contenders": [item.to_dict() for item in record.contenders]}
+
+
+@router.get(
+    "/runs/{run_id}/analysis",
+    summary="Снимок готовности и проверки утечек на момент запуска",
+    description=(
+        "Возвращает неизменяемый анализ, с которым прогон был запущен. "
+        "В частности, Leakage Guard сохраняет не только найденные сигналы, но и "
+        "проверки, которые выполнить не удалось: отсутствие сигнала не подменяется "
+        "утверждением об отсутствии утечки."
+    ),
+)
+def get_run_analysis(run_id: str) -> dict[str, Any]:
+    runner = get_runner()
+    #проверяем существование прогона до обращения к его каталогу
+    runner.get(run_id)
+    path = runner.store.directory(run_id) / "analysis.json"
+
+    if not path.exists():
+        return {
+            "run_id": run_id,
+            "analysis": None,
+            "note": "Для этого исторического прогона снимок анализа не сохранён.",
+        }
+
+    try:
+        analysis = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValidationError(
+            f"Сохранённый анализ прогона не читается: {type(error).__name__}."
+        ) from error
+
+    if not isinstance(analysis, dict):
+        raise ValidationError("Сохранённый анализ прогона имеет неверный формат.")
+
+    return {"run_id": run_id, "analysis": analysis, "note": ""}
 
 
 class ConstraintRequest(BaseModel):
