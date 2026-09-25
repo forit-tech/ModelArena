@@ -28,6 +28,7 @@ function contender(overrides: Partial<ContenderRun>): ContenderRun {
     started_at: null,
     finished_at: null,
     elapsed_seconds: 1,
+    artifact: null,
     coverage: null,
     warnings: [],
     metrics: [],
