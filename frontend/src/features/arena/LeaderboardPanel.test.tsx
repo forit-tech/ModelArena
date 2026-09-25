@@ -191,7 +191,7 @@ describe('LeaderboardPanel', () => {
 
     await waitFor(() => expect(screen.getByText('8.40 с')).toBeInTheDocument())
     expect(screen.getByText('42.0 МБ')).toBeInTheDocument()
-    expect(screen.getByText('99.00')).toBeInTheDocument()
+    expect(screen.getByText('99.00 усл. ед.')).toBeInTheDocument()
   })
 
   it('не скрывает проверки утечки, которые выполнить не удалось', async () => {
