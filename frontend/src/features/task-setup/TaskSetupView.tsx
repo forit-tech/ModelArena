@@ -11,6 +11,7 @@ import { analyzeTask, getDataset } from '../../api/endpoints'
 import { FailureNotice } from '../../components/FailureNotice'
 import { Notice } from '../../components/Notice'
 import { useRequest } from '../../hooks/useRequest'
+import { LeakagePanel } from '../leakage/LeakagePanel'
 import { ReadinessPanel } from './ReadinessPanel'
 
 const TASK_TYPE_LABELS: Record<string, string> = {
@@ -99,6 +100,7 @@ export function TaskSetupView({ datasetId, onAnalyzed }: TaskSetupViewProps) {
       {analysis.data ? (
         <>
           <ReadinessPanel readiness={analysis.data.readiness} />
+          <LeakagePanel report={analysis.data.leakage} />
 
           <section className="panel">
             <h2>Задача</h2>
@@ -207,8 +209,8 @@ export function TaskSetupView({ datasetId, onAnalyzed }: TaskSetupViewProps) {
           <section className="panel">
             <h2>Дальше</h2>
             <p className="hint">
-              Обучение появится на следующих этапах. Сейчас ModelArena умеет принять датасет,
-              поставить задачу и выбрать протокол — но моделей ещё не запускает.
+              Постановка зафиксирована. Перейдите в «Прогон»: там все выбранные модели будут
+              обучены по одному протоколу, а Leakage Guard останется видим рядом с leaderboard.
             </p>
           </section>
         </>
