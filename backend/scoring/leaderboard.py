@@ -63,6 +63,10 @@ class LeaderboardRow:
     #все метрики кросс-валидации, а не только целевая: выбор по одной не должен скрывать,
     #что модель проигрывает по остальным
     cross_validated: list[dict[str, Any]]
+    #фактическая цена уже завершённого обучения. Это измерения, а estimated_cost выше —
+    #априорная оценка планировщика; смешивать их в одном поле нельзя.
+    elapsed_seconds: float | None = None
+    model_bytes: int | None = None
     #holdout показывается рядом и помечен как не участвовавший в выборе
     holdout: list[dict[str, Any]] = field(default_factory=list)
     constraints: list[ConstraintStatus] = field(default_factory=list)
@@ -82,6 +86,8 @@ class LeaderboardRow:
             "std": self.std,
             "per_fold": self.per_fold,
             "estimated_cost": self.estimated_cost,
+            "elapsed_seconds": self.elapsed_seconds,
+            "model_bytes": self.model_bytes,
             "cross_validated": self.cross_validated,
             "holdout": self.holdout,
             "constraints": [item.to_dict() for item in self.constraints],
@@ -153,6 +159,12 @@ def build_leaderboard(
                 state_reason=item.error_message or item.selection_reason,
                 task=task,
                 cost=cost,
+                elapsed_seconds=item.elapsed_seconds,
+                model_bytes=(
+                    int(item.artifact["model_bytes"])
+                    if item.artifact and item.artifact.get("model_bytes") is not None
+                    else None
+                ),
             )
         )
 
@@ -184,6 +196,8 @@ def _row_for(
     state_reason: str,
     task: dict[str, Any],
     cost: float,
+    elapsed_seconds: float | None,
+    model_bytes: int | None,
 ) -> LeaderboardRow:
     row = LeaderboardRow(
         contender_key=contender_key,
@@ -196,6 +210,8 @@ def _row_for(
         per_fold=[],
         estimated_cost=cost,
         cross_validated=[],
+        elapsed_seconds=elapsed_seconds,
+        model_bytes=model_bytes,
         eligible=False,
         reason=state_reason,
     )
