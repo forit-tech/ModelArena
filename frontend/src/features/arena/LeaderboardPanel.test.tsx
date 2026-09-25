@@ -9,7 +9,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { LeaderboardPanel } from './LeaderboardPanel'
-import type { LeaderboardRow, PairedComparison } from '../../api/types'
+import type { LeaderboardRow, LeakageReport, PairedComparison } from '../../api/types'
 
 function comparison(overrides: Partial<PairedComparison> = {}): PairedComparison {
   return {
@@ -37,6 +37,8 @@ function row(overrides: Partial<LeaderboardRow> = {}): LeaderboardRow {
     std: 0.01,
     per_fold: [0.9, 0.9],
     estimated_cost: 1,
+    elapsed_seconds: 8.4,
+    model_bytes: 44_040_192,
     cross_validated: [
       {
         key: 'roc_auc',
@@ -58,42 +60,70 @@ function row(overrides: Partial<LeaderboardRow> = {}): LeaderboardRow {
   }
 }
 
-function mockBoard(rows: LeaderboardRow[], champion: Record<string, unknown>) {
+const cleanLeakage: LeakageReport = {
+  risk: 'none',
+  summary: 'Явных механизмов утечки не обнаружено.',
+  signals: [],
+  not_evaluated: [],
+  disclaimer:
+    'Guard не может доказать ни наличие, ни отсутствие утечки без знания реального процесса.',
+}
+
+function mockBoard(
+  rows: LeaderboardRow[],
+  champion: Record<string, unknown>,
+  leakage: LeakageReport = cleanLeakage,
+) {
   vi.stubGlobal(
     'fetch',
-    vi.fn(
-      async () =>
-        new Response(
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+
+      if (url.endsWith('/analysis')) {
+        return new Response(
           JSON.stringify({
             run_id: 'run_0123456789abcdef0123',
-            run_state: 'SUCCEEDED',
-            leaderboard: {
-              objective: {
-                metric: 'roc_auc',
-                task_type: 'binary',
-                higher_is_better: true,
-                constraints: [],
-                tie_breakers: [],
-                min_gain_over_baseline: 0,
-                description: 'Максимизируем roc_auc.',
-              },
-              rows,
-              champion: {
-                contender_key: null,
-                label: '',
-                reason: '',
-                over_baseline: null,
-                over_runner_up: null,
-                decided_by_tie_breaker: '',
-                ...champion,
-              },
-              baseline_key: 'baseline_majority',
-              notes: ['Ранжирование сделано по кросс-валидации.'],
+            analysis: {
+              readiness: { status: 'READY', summary: '', context: {}, findings: [] },
+              leakage,
             },
+            note: '',
           }),
           { status: 200, headers: { 'content-type': 'application/json' } },
-        ),
-    ),
+        )
+      }
+
+      return new Response(
+        JSON.stringify({
+          run_id: 'run_0123456789abcdef0123',
+          run_state: 'SUCCEEDED',
+          leaderboard: {
+            objective: {
+              metric: 'roc_auc',
+              task_type: 'binary',
+              higher_is_better: true,
+              constraints: [],
+              tie_breakers: [],
+              min_gain_over_baseline: 0,
+              description: 'Максимизируем roc_auc.',
+            },
+            rows,
+            champion: {
+              contender_key: null,
+              label: '',
+              reason: '',
+              over_baseline: null,
+              over_runner_up: null,
+              decided_by_tie_breaker: '',
+              ...champion,
+            },
+            baseline_key: 'baseline_majority',
+            notes: ['Ранжирование сделано по кросс-валидации.'],
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )
+    }),
   )
 }
 
@@ -150,6 +180,41 @@ describe('LeaderboardPanel', () => {
     expect(screen.getByText(/precision не ниже 0.99/)).toBeInTheDocument()
     //результат у неё есть, просто к первому месту она не допущена
     expect(screen.getByText(/результат есть: 0.9500/)).toBeInTheDocument()
+  })
+
+  it('показывает измеренное время и размер отдельно от оценки до запуска', async () => {
+    mockBoard(
+      [row({ estimated_cost: 99, elapsed_seconds: 8.4, model_bytes: 44_040_192 })],
+      { contender_key: 'model', label: 'Модель', reason: 'Чемпион.' },
+    )
+    render(<LeaderboardPanel runId="run_0123456789abcdef0123" active={false} />)
+
+    await waitFor(() => expect(screen.getByText('8.40 с')).toBeInTheDocument())
+    expect(screen.getByText('42.0 МБ')).toBeInTheDocument()
+    expect(screen.getByText('99.00')).toBeInTheDocument()
+  })
+
+  it('не скрывает проверки утечки, которые выполнить не удалось', async () => {
+    mockBoard(
+      [row()],
+      { contender_key: 'model', label: 'Модель', reason: 'Чемпион.' },
+      {
+        ...cleanLeakage,
+        not_evaluated: [
+          {
+            check: 'single_feature_predictive',
+            scope: 'features',
+            reason: 'Проверка не выполнилась из-за несовместимого типа.',
+            consequence: 'По этому механизму вывода нет.',
+          },
+        ],
+      },
+    )
+    render(<LeaderboardPanel runId="run_0123456789abcdef0123" active={false} />)
+
+    await waitFor(() => expect(screen.getByText('Проверено не всё: 1')).toBeInTheDocument())
+    expect(screen.getByText(/несовместимого типа/)).toBeInTheDocument()
+    expect(screen.getByText(/не может доказать/)).toBeInTheDocument()
   })
 
   it('предупреждает, что на идущем прогоне таблица неполна', async () => {
