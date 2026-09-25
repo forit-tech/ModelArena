@@ -205,6 +205,12 @@ def _run_with(
             is_baseline=spec.get("is_baseline", False),
             state=spec.get("state", "SUCCEEDED"),
             error_message=spec.get("error_message", ""),
+            elapsed_seconds=spec.get("elapsed_seconds"),
+            artifact=(
+                {"model_bytes": spec["model_bytes"]}
+                if spec.get("model_bytes") is not None
+                else None
+            ),
         )
         for key, spec in contenders.items()
     ]
@@ -245,6 +251,35 @@ def _run_with(
         ).write_parquet(target / "predictions.parquet")
 
     return record
+
+
+def test_leaderboard_keeps_measured_cost_separate_from_estimate(tmp_path: Path) -> None:
+    """Факт после обучения не подменяется оценкой, известной до запуска."""
+    store = RunStore(root=tmp_path)
+    record = _run_with(
+        store,
+        {
+            "baseline_majority": {
+                "folds": [0.50, 0.50, 0.50],
+                "is_baseline": True,
+            },
+            "model": {
+                "folds": [0.90, 0.90, 0.90],
+                "cost": 99.0,
+                "elapsed_seconds": 8.4,
+                "model_bytes": 44_040_192,
+            },
+        },
+    )
+
+    board = build_leaderboard(
+        record=record, store=store, objective=default_objective("binary")
+    )
+    row = next(item for item in board.rows if item.contender_key == "model")
+
+    assert row.estimated_cost == 99.0
+    assert row.elapsed_seconds == 8.4
+    assert row.model_bytes == 44_040_192
 
 
 def test_champion_requires_superiority_that_holds_on_every_fold(tmp_path: Path) -> None:
