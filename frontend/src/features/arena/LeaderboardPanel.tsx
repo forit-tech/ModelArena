@@ -120,7 +120,7 @@ export function LeaderboardPanel({ runId, active }: LeaderboardPanelProps) {
                 <th>{metricLabel(data, metric)}</th>
                 <th>Обучение · измерено</th>
                 <th>Артефакт · измерено</th>
-                <th>Оценка до запуска</th>
+                <th>Оценка до запуска · усл. ед.</th>
                 <th>Против следующего</th>
                 <th>Против точки отсчёта</th>
               </tr>
@@ -141,7 +141,7 @@ export function LeaderboardPanel({ runId, active }: LeaderboardPanelProps) {
                   <td>{formatScore(row)}</td>
                   <td>{formatDuration(row.elapsed_seconds)}</td>
                   <td>{formatBytes(row.model_bytes)}</td>
-                  <td>{row.estimated_cost.toFixed(2)}</td>
+                  <td>{row.estimated_cost.toFixed(2)} усл. ед.</td>
                   <td>
                     <Verdict comparison={row.versus_next} />
                   </td>
@@ -173,7 +173,7 @@ export function LeaderboardPanel({ runId, active }: LeaderboardPanelProps) {
                   <span className="muted">
                     обучение: {formatDuration(row.elapsed_seconds)} · артефакт:{' '}
                     {formatBytes(row.model_bytes)} · оценка до запуска:{' '}
-                    {row.estimated_cost.toFixed(2)}
+                    {row.estimated_cost.toFixed(2)} усл. ед.
                   </span>
                 </div>
                 <p className="contender-reason">{row.reason}</p>
